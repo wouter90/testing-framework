@@ -77,20 +77,23 @@ final readonly class DataSet
                     break;
                 }
             }
-            foreach ($dataSet->getElements($tableName) as $element) {
-                // Some DBMS like postgresql are picky about inserting blob types with correct cast, setting
-                // types correctly (like Connection::PARAM_LOB) allows doctrine to create valid SQL
+            $fields = $dataSet->getFields($tableName);
+            $elements = $dataSet->getElements($tableName);
+            if ($fields !== null && $elements !== []) {
                 $types = [];
-                foreach ($element as $columnName => $columnValue) {
+                foreach ($fields as $columnName) {
                     $types[$columnName] = $columnType = $columnInfos[$columnName]->getType();
-                    // JSON-Field data is converted (json-encode'd) within $connection->insert(), and since json field
-                    // data can only be provided json encoded in the csv dataset files, we need to decode them here.
-                    if ($columnValue !== null && $columnType instanceof JsonType) {
-                        $element[$columnName] = $columnType->convertToPHPValue($columnValue, $platform);
+                    if ($columnType instanceof JsonType) {
+                        // JSON values in CSV files are encoded and must be converted before insertion.
+                        foreach ($elements as &$element) {
+                            if ($element[$columnName] !== null) {
+                                $element[$columnName] = $columnType->convertToPHPValue($element[$columnName], $platform);
+                            }
+                        }
+                        unset($element);
                     }
                 }
-                // Insert the row
-                $connection->insert($tableName, $element, $types);
+                $connection->bulkInsert($tableName, $elements, $fields, $types);
             }
             if ($autoIncrementColumnName !== null) {
                 Testbase::resetTableSequences($connection, $tableName, $autoIncrementColumnName);
